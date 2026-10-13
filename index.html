@@ -326,7 +326,7 @@ const E = {
   walls:[], pts:[], interior:null, opening:{x0:0,x1:0,y:0}, floorY:0, interiorArea:1,
   cont:'cup', sizeF:0.82, pal:PALETTES[0], form:'circle',
   released:0, total:0, relAcc:0, elapsed:0, duration:0, last:0,
-  gx:0, gy:GRAV, shakeX:0, shakeY:0, pileTopY:1e9, tiltN:0,
+  gx:0, gy:GRAV, shakeX:0, shakeY:0, pileTopY:1e9, tiltN:0, wakeList:[],
 };
 
 function sizeCanvas(){
@@ -402,7 +402,7 @@ function spawn(){
     r: GR*(0.9+Math.random()*0.25),
     rot:Math.random()*6.28, vr:(Math.random()-0.5)*4, ph:Math.random()*6.28,
     form:E.form, shade:shade(E.released), ri:(Math.random()*4)|0,
-    restT:0, settled:false, ck:'',
+    restT:0, settled:false, ck:'', cool:0, _wake:false,
   };
 }
 const gk = (x,y)=> Math.floor(x/CELL)+','+Math.floor(y/CELL);
@@ -443,7 +443,14 @@ function collideSettled(gr){
         const d=Math.sqrt(d2), nx=dx/d, ny=dy/d;
         gr.x=s.x+nx*rr; gr.y=s.y+ny*rr;
         const vn=gr.vx*nx+gr.vy*ny;
-        if(vn<0){ gr.vx-=1.05*vn*nx; gr.vy-=1.05*vn*ny; gr.vx*=0.92; gr.vy*=0.92; hit=true; }
+        if(vn<0){
+          gr.vx-=1.05*vn*nx; gr.vy-=1.05*vn*ny; gr.vx*=0.92; gr.vy*=0.92; hit=true;
+          // hard impact wakes nearby settled grains: force-chain propagation
+          if(-vn>150 && !s._wake){
+            const depth=(s.y-E.pileTopY)/Math.max(1,(E.floorY-E.pileTopY));
+            if(depth<0.5 && Math.random()<0.35){ s._wake=true; E.wakeList.push(s); }
+          }
+        }
       }
     }
   }
@@ -452,7 +459,7 @@ function collideSettled(gr){
 function settleGrain(i){
   const gr=E.grains[i];
   E.grains.splice(i,1);
-  gr.settled=true; gr.vx=gr.vy=0;
+  gr.settled=true; gr.vx=gr.vy=0; gr.cool=0;
   E.settled.push(gr); gridAdd(gr);
   if(gr.y<E.pileTopY) E.pileTopY=gr.y;
   if(E.dust.length<100 && Math.random()<0.25)
@@ -460,35 +467,89 @@ function settleGrain(i){
       age:0, life:0.35+Math.random()*0.3, r:0.8+Math.random()*1.4});
 }
 function step(h){
+  E.wakeList.length=0;
   for(let i=E.grains.length-1;i>=0;i--){
     const gr=E.grains[i];
     gr.vy+=E.gy*h; gr.vx+=E.gx*h;
     const s2=gr.vx*gr.vx+gr.vy*gr.vy;
     if(s2>810000){ const sc=900/Math.sqrt(s2); gr.vx*=sc; gr.vy*=sc; }
     gr.x+=gr.vx*h; gr.y+=gr.vy*h; gr.rot+=gr.vr*h;
+    if(gr.cool>0) gr.cool-=h;
     let contact=false;
     for(let w=0;w<E.walls.length;w++) if(collideSeg(gr,E.walls[w])) contact=true;
     if(collideSettled(gr)) contact=true;
     const sp=Math.sqrt(gr.vx*gr.vx+gr.vy*gr.vy);
-    if(contact && sp<95) gr.restT+=h; else gr.restT=0;
-    if(gr.restT>0.07){ settleGrain(i); continue; }
+    if(gr.cool<=0){
+      if(contact && sp<95) gr.restT+=h; else gr.restT=0;
+      if(gr.restT>0.07){ settleGrain(i); continue; }
+    }
     if(gr.y>H+60||gr.x<-60||gr.x>W+60) E.grains.splice(i,1);
   }
-}
-/* wake the pile surface: shake / tilt slosh */
-function wakeSurface(frac){
-  const keep=[];
-  const span=Math.max(1,(E.floorY-E.pileTopY));
-  for(const s of E.settled){
-    const depth=(s.y-E.pileTopY)/span;
-    if(Math.random()<frac*(1-depth)){
+  if(E.wakeList.length){
+    for(const s of E.wakeList){
       gridDel(s);
-      s.settled=false; s.restT=0;
-      s.vx=(Math.random()-0.5)*340; s.vy=-Math.random()*220;
+      s.settled=false; s.restT=0; s.cool=0.15;
+      s.vx=(Math.random()-0.5)*220; s.vy=-Math.random()*160;
+      E.grains.push(s);
+    }
+    E.settled=E.settled.filter(s=>!s._wake);
+    for(const s of E.wakeList) s._wake=false;
+    recomputePileTop();
+  }
+}
+/* shake: fluidize the whole pile — every grain (top to bottom) tumbles, collides and re-settles */
+function shakeAll(){
+  const frac=E.settled.length>4000?0.6:0.8;
+  const keep=[];
+  for(const s of E.settled){
+    if(Math.random()<frac){
+      gridDel(s);
+      s.settled=false; s.restT=0; s.cool=0.25+Math.random()*0.25;
+      const a=Math.random()*6.283, sp=90+Math.random()*280;
+      s.vx=Math.cos(a)*sp; s.vy=Math.sin(a)*sp-130;
       E.grains.push(s);
     } else keep.push(s);
   }
   E.settled=keep;
+  supportPass();
+  recomputePileTop();
+}
+function segDist(px,py,s){
+  const ax=s[0],ay=s[1],bx=s[2],by=s[3];
+  const abx=bx-ax, aby=by-ay, den=abx*abx+aby*aby||1;
+  let tt=((px-ax)*abx+(py-ay)*aby)/den;
+  tt=tt<0?0:(tt>1?1:tt);
+  return Math.hypot(px-(ax+abx*tt), py-(ay+aby*tt));
+}
+function hasSupport(s){
+  for(const w of E.walls) if(segDist(s.x,s.y+s.r+1.5,w)<3) return true;
+  const cx=Math.floor(s.x/CELL), cy=Math.floor(s.y/CELL);
+  for(let ix=cx-1;ix<=cx+1;ix++) for(let iy=cy;iy<=cy+1;iy++){
+    const cell=E.grid.get(ix+','+iy);
+    if(!cell) continue;
+    for(const o of cell){
+      if(o===s) continue;
+      const dx=o.x-s.x, dy=o.y-s.y, rr=s.r+o.r+2.5;
+      if(dy>-1 && dx*dx+dy*dy<rr*rr) return true;
+    }
+  }
+  return false;
+}
+/* wake settled grains left floating after a shake */
+function supportPass(){
+  const keep=[];
+  let changed=false;
+  for(const s of E.settled){
+    if(!hasSupport(s)){
+      gridDel(s);
+      s.settled=false; s.restT=0; s.cool=0.2;
+      s.vx=(Math.random()-0.5)*120; s.vy=0;
+      E.grains.push(s); changed=true;
+    } else keep.push(s);
+  }
+  if(changed) E.settled=keep;
+}
+function recomputePileTop(){
   E.pileTopY=E.floorY;
   for(const s of E.settled) if(s.y<E.pileTopY) E.pileTopY=s.y;
 }
@@ -747,7 +808,7 @@ function onShake(e){
       gr.vy-=Math.random()*300;
     }
     E.shakeX=7; E.shakeY=7;
-    wakeSurface(0.55);
+    shakeAll();
   }
 }
 document.getElementById('bGyro').onclick=toggleGyro;
