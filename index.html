@@ -327,6 +327,7 @@ const E = {
   cont:'full', sizeF:0.82, pal:PALETTES[0], form:'circle',
   released:0, total:0, relAcc:0, elapsed:0, duration:0, last:0,
   gx:0, gy:GRAV, shakeX:0, shakeY:0, pileTopY:1e9, tiltN:0, wakeList:[],
+  gravX:0, gravY:0, gravInit:false, lastOrientMs:0,
 };
 
 function sizeCanvas(){
@@ -623,6 +624,7 @@ function startRun(){
   E.grains=[]; E.settled=[]; E.grid=new Map(); E.dust=[];
   E.released=0; E.relAcc=0; E.elapsed=0; E.done=false; E.paused=false;
   E.gx=0; E.gy=GRAV; E.shakeX=0; E.shakeY=0; E.pileTopY=1e9; E.tiltN=0;
+  E.gravInit=false; E.lastOrientMs=0;
   E.total=Math.max(60, Math.floor(E.interiorArea*0.82/(Math.PI*GR*GR)));
   E.duration=S.minutes*60000;
   document.getElementById('setup').classList.add('hide');
@@ -644,6 +646,10 @@ function loop(now){
       E.grains.push(spawn());
     }
     step(dt/2); step(dt/2);
+    if(gyroOn && E.gravInit && now-E.lastOrientMs>1500){
+      E.tiltN=tiltFromAccel();
+      E.gx=E.tiltN*GRAV*0.55;
+    }
     if(Math.abs(E.tiltN)>0.08) tiltFlow();
     for(let i=E.dust.length-1;i>=0;i--){
       const d=E.dust[i]; d.age+=dt;
@@ -791,20 +797,37 @@ function stopGyro(){
   document.getElementById('bGyro').classList.remove('on');
   window.removeEventListener('deviceorientation',onTilt);
   window.removeEventListener('devicemotion',onShake);
-  E.gx=0; E.gy=GRAV; E.tiltN=0;
+  E.gx=0; E.gy=GRAV; E.tiltN=0; E.gravInit=false;
   toast(t('gyro_off'));
 }
 function onTilt(e){
   if(!gyroOn) return;
   const n=Math.max(-1,Math.min(1,(e.gamma||0)/40));
   E.tiltN=n;
+  E.lastOrientMs=performance.now();
   E.gx=n*GRAV*0.55;
+}
+/* fallback: derive roll from low-passed gravity when deviceorientation goes silent */
+function tiltFromAccel(){
+  const portrait=H>=W;
+  let ax;
+  if(portrait) ax=E.gravX;
+  else{
+    let ang=0;
+    try{ ang=(typeof screen!=='undefined'&&screen.orientation&&screen.orientation.angle)||0; }catch(_){}
+    ax=(ang===90)?-E.gravY:E.gravY;
+  }
+  return Math.max(-1,Math.min(1,-ax/9.8*1.6));
 }
 function onShake(e){
   if(!gyroOn) return;
   const a=e.accelerationIncludingGravity;
   if(!a) return;
-  if(Math.hypot(a.x||0,a.y||0,a.z||0)>21){
+  const ax=a.x||0, ay=a.y||0;
+  if(!E.gravInit){ E.gravX=ax; E.gravY=ay; E.gravInit=true; }
+  E.gravX+=(ax-E.gravX)*0.08;
+  E.gravY+=(ay-E.gravY)*0.08;
+  if(Math.hypot(ax,ay,a.z||0)>21){
     for(const gr of E.grains){
       gr.vx+=(Math.random()-0.5)*560;
       gr.vy-=Math.random()*300;
