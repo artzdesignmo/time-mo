@@ -162,12 +162,12 @@ const t = k => (I18N[lang] && I18N[lang][k]) || I18N.en[k] || k;
 
 /* ================= data ================= */
 const PALETTES = [
-  {id:'gold',   c:['#a8842c','#e0b64f','#f6dd9a']},
-  {id:'ember',  c:['#a04a34','#d4694f','#f0a58c']},
-  {id:'leaf',   c:['#2f7d52','#55ad7d','#9adcb8']},
-  {id:'ocean',  c:['#256a94','#4d9fd1','#9ccfee']},
-  {id:'violet', c:['#5b4a9e','#7f6cc4','#b7a9e8']},
-  {id:'rose',   c:['#9e3a5e','#c65f83','#eba9c2']},
+  {id:'gold',   c:['#a86e00','#f0a500','#ffcf4d']},
+  {id:'ember',  c:['#c23a1d','#f4502a','#ff8a5c']},
+  {id:'leaf',   c:['#1e9e4a','#35d05f','#7ded9a']},
+  {id:'ocean',  c:['#0b7cc4','#1fa2f0','#6fc7ff']},
+  {id:'violet', c:['#6a3df0','#8b5cf6','#b79bff']},
+  {id:'rose',   c:['#d61f5c','#f43f7e','#ff8ab3']},
 ];
 const FORMS = ['circle','square','triangle','diamond','hexagon'];
 const TIMES = [1,5,10,15,30,60];
@@ -327,20 +327,30 @@ const E = {
   cont:'full', sizeF:0.82, pal:PALETTES[0], form:'circle',
   released:0, total:0, relAcc:0, elapsed:0, duration:0, last:0,
   gx:0, gy:GRAV, shakeX:0, shakeY:0, pileTopY:1e9, tiltN:0, wakeList:[],
-  gravX:0, gravY:0, gravInit:false, lastOrientMs:0,
+  gravX:0, gravY:0, gravInit:false, lastOrientMs:0, sparkles:[],
 };
 
 function sizeCanvas(){
   DPR = Math.min(2, window.devicePixelRatio || 1);
   W = window.innerWidth; H = window.innerHeight;
   cv.width = Math.round(W*DPR); cv.height = Math.round(H*DPR);
+  initSparkles();
+}
+/* tiny twinkling white dots */
+function initSparkles(){
+  E.sparkles=[];
+  const n=Math.max(12, Math.floor(W*H/12000));
+  for(let i=0;i<n;i++) E.sparkles.push({
+    x:Math.random()*W, y:Math.random()*H,
+    r:0.7+Math.random()*1.2, ph:Math.random()*6.28, sp:0.8+Math.random()*2.2,
+  });
 }
 function buildContainer(){
   const walls = [];
   let pts;
   if(E.cont === 'full'){
     pts = [[0,0],[0,H],[W,H],[W,0]];
-    walls.push([0,0,0,H],[W,0,W,H],[0,H,W,H]);
+    walls.push([0,-300,0,H],[W,-300,W,H],[0,H,W,H]);
     E.opening = {x0:0, x1:W, y:-10};
     E.floorY = H;
     E.interiorArea = W*H;
@@ -359,6 +369,7 @@ function buildContainer(){
     let a=0;
     for(let i=0;i<pts.length;i++){ const [x1,y1]=pts[i], [x2,y2]=pts[(i+1)%pts.length]; a+=x1*y2-x2*y1; }
     E.interiorArea = Math.abs(a)/2;
+    walls.push([0,-300,0,H],[W,-300,W,H]); // screen edges block shaken grains
   }
   E.walls = walls; E.pts = pts;
   const p = new Path2D();
@@ -668,6 +679,11 @@ function render(now){
   const bg=ctx.createLinearGradient(0,0,0,H);
   bg.addColorStop(0,'#0e0d0a'); bg.addColorStop(1,'#060505');
   ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+  for(const s of E.sparkles){
+    const a=0.07+0.22*Math.abs(Math.sin(now*0.001*s.sp+s.ph));
+    ctx.fillStyle='rgba(255,255,255,'+a.toFixed(3)+')';
+    ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,6.2832); ctx.fill();
+  }
   ctx.save();
   if(E.shakeX||E.shakeY) ctx.translate(E.shakeX*Math.random(),E.shakeY*Math.random());
   if(E.cont!=='full'){
