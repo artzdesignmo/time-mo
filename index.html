@@ -326,7 +326,7 @@ const E = {
   walls:[], pts:[], interior:null, opening:{x0:0,x1:0,y:0}, floorY:0, interiorArea:1,
   cont:'cup', sizeF:0.82, pal:PALETTES[0], form:'circle',
   released:0, total:0, relAcc:0, elapsed:0, duration:0, last:0,
-  gx:0, gy:GRAV, shakeX:0, shakeY:0, pileTopY:1e9, lastTiltN:0,
+  gx:0, gy:GRAV, shakeX:0, shakeY:0, pileTopY:1e9, tiltN:0,
 };
 
 function sizeCanvas(){
@@ -492,6 +492,31 @@ function wakeSurface(frac){
   E.pileTopY=E.floorY;
   for(const s of E.settled) if(s.y<E.pileTopY) E.pileTopY=s.y;
 }
+/* continuous tilt flow: while the phone is held tilted, surface sand streams toward the low side */
+function tiltFlow(){
+  const tn=E.tiltN, mag=Math.abs(tn);
+  if(mag<0.2 || !E.settled.length) return;
+  const span=Math.max(1,(E.floorY-E.pileTopY));
+  const p=mag*0.03, dir=tn>0?1:-1;
+  const keep=[];
+  let changed=false;
+  for(const s of E.settled){
+    const depth=(s.y-E.pileTopY)/span;
+    if(depth<0.35 && Math.random()<p){
+      gridDel(s);
+      s.settled=false; s.restT=0;
+      s.vx=dir*(120+Math.random()*260);
+      s.vy=-Math.random()*160;
+      E.grains.push(s);
+      changed=true;
+    } else keep.push(s);
+  }
+  if(changed){
+    E.settled=keep;
+    E.pileTopY=E.floorY;
+    for(const s of E.settled) if(s.y<E.pileTopY) E.pileTopY=s.y;
+  }
+}
 function inPoly(x, y, pts){
   let inside=false;
   for(let i=0,j=pts.length-1;i<pts.length;j=i++){
@@ -534,7 +559,7 @@ function startRun(){
   buildContainer();
   E.grains=[]; E.settled=[]; E.grid=new Map(); E.dust=[];
   E.released=0; E.relAcc=0; E.elapsed=0; E.done=false; E.paused=false;
-  E.gx=0; E.gy=GRAV; E.shakeX=0; E.shakeY=0; E.pileTopY=1e9; E.lastTiltN=0;
+  E.gx=0; E.gy=GRAV; E.shakeX=0; E.shakeY=0; E.pileTopY=1e9; E.tiltN=0;
   E.total=Math.max(60, Math.floor(E.interiorArea*0.82/(Math.PI*GR*GR)));
   E.duration=S.minutes*60000;
   document.getElementById('setup').classList.add('hide');
@@ -556,6 +581,7 @@ function loop(now){
       E.grains.push(spawn());
     }
     step(dt/2); step(dt/2);
+    if(Math.abs(E.tiltN)>0.2) tiltFlow();
     for(let i=E.dust.length-1;i>=0;i--){
       const d=E.dust[i]; d.age+=dt;
       if(d.age>=d.life){ E.dust.splice(i,1); continue; }
@@ -702,14 +728,14 @@ function stopGyro(){
   document.getElementById('bGyro').classList.remove('on');
   window.removeEventListener('deviceorientation',onTilt);
   window.removeEventListener('devicemotion',onShake);
-  E.gx=0; E.gy=GRAV; E.lastTiltN=0;
+  E.gx=0; E.gy=GRAV; E.tiltN=0;
   toast(t('gyro_off'));
 }
 function onTilt(e){
   if(!gyroOn) return;
   const n=Math.max(-1,Math.min(1,(e.gamma||0)/40));
+  E.tiltN=n;
   E.gx=n*GRAV*0.55;
-  if(Math.abs(n-E.lastTiltN)>0.3){ wakeSurface(0.3); E.lastTiltN=n; }
 }
 function onShake(e){
   if(!gyroOn) return;
@@ -721,7 +747,7 @@ function onShake(e){
       gr.vy-=Math.random()*300;
     }
     E.shakeX=7; E.shakeY=7;
-    wakeSurface(0.45);
+    wakeSurface(0.55);
   }
 }
 document.getElementById('bGyro').onclick=toggleGyro;
