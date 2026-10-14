@@ -80,7 +80,6 @@
   <header>
     <div class="brand">TIME CO<small id="brandSub">SAND TIMER</small></div>
     <div class="hctl">
-      <div class="lang"><button id="langEn" class="on">EN</button><button id="langZh">中</button></div>
       <div class="themes">
         <button class="tdot" data-t="white" aria-label="white"></button><button class="tdot on" data-t="silver" aria-label="silver"></button><button class="tdot" data-t="black" aria-label="black"></button>
       </div>
@@ -156,7 +155,7 @@ zh:{
   min_u:"分", paused:"已暫停",
   toast_color:"顏色", toast_shape:"形態", gyro_on:"動態開", gyro_off:"動態關", gyro_na:"唔支援動態",
 }};
-let lang = localStorage.getItem('timeco-lang') || 'en';
+const lang = 'en'; // English only
 let theme = localStorage.getItem('timeco-theme') || 'silver';
 const t = k => (I18N[lang] && I18N[lang][k]) || I18N.en[k] || k;
 
@@ -203,17 +202,12 @@ function applyTheme(){
   localStorage.setItem('timeco-theme', theme);
 }
 function applyLang(){
-  document.documentElement.lang = lang==='zh' ? 'zh-Hant' : 'en';
+  document.documentElement.lang = 'en';
   document.querySelectorAll('[data-i]').forEach(el=>{ el.textContent = t(el.dataset.i); });
-  document.getElementById('langEn').classList.toggle('on', lang==='en');
-  document.getElementById('langZh').classList.toggle('on', lang==='zh');
   document.getElementById('brandSub').textContent = t('brand_sub');
   document.getElementById('customMin').placeholder = t('custom_ph');
-  localStorage.setItem('timeco-lang', lang);
   buildSetup();
 }
-document.getElementById('langEn').onclick = ()=>{ lang='en'; applyLang(); };
-document.getElementById('langZh').onclick = ()=>{ lang='zh'; applyLang(); };
 document.querySelectorAll('.tdot').forEach(b=> b.onclick = ()=>{ theme=b.dataset.t; applyTheme(); });
 
 /* ================= setup ================= */
@@ -327,7 +321,7 @@ const E = {
   cont:'full', sizeF:0.82, pal:PALETTES[0], form:'circle',
   released:0, total:0, relAcc:0, elapsed:0, duration:0, last:0,
   gx:0, gy:GRAV, shakeX:0, shakeY:0, pileTopY:1e9, tiltN:0, wakeList:[],
-  gravX:0, gravY:0, gravInit:false, lastOrientMs:0, sparkles:[],
+  gravX:0, gravY:0, gravInit:false, lastOrientMs:0, sparkles:[], pourT:0,
 };
 
 function sizeCanvas(){
@@ -407,8 +401,13 @@ function sprite(form, sh, ri){
 function spawn(){
   const o = E.opening;
   const m = Math.min(16, (o.x1-o.x0)*0.14);
+  const w = Math.max(6,(o.x1-o.x0-2*m));
+  // sweep the pour point back and forth for an even fill (no cone peak)
+  const sweep = Math.sin(E.pourT*1.15);
+  let x = o.x0+m + w*0.5 + sweep*w*0.36 + (Math.random()-0.5)*w*0.22;
+  x = Math.max(o.x0+2, Math.min(o.x1-2, x));
   return {
-    x: o.x0+m+Math.random()*Math.max(6,(o.x1-o.x0-2*m)),
+    x,
     y: E.cont==='full' ? -14-Math.random()*50 : Math.max(-30, o.y-170-Math.random()*90),
     vx:(Math.random()-0.5)*30, vy:30+Math.random()*40,
     r: GR*(0.9+Math.random()*0.25),
@@ -635,8 +634,8 @@ function startRun(){
   E.grains=[]; E.settled=[]; E.grid=new Map(); E.dust=[];
   E.released=0; E.relAcc=0; E.elapsed=0; E.done=false; E.paused=false;
   E.gx=0; E.gy=GRAV; E.shakeX=0; E.shakeY=0; E.pileTopY=1e9; E.tiltN=0;
-  E.gravInit=false; E.lastOrientMs=0;
-  E.total=Math.max(60, Math.floor(E.interiorArea*0.82/(Math.PI*GR*GR)));
+  E.gravInit=false; E.lastOrientMs=0; E.pourT=0;
+  E.total=Math.max(60, Math.floor(E.interiorArea*0.93/(Math.PI*GR*GR)));
   E.duration=S.minutes*60000;
   document.getElementById('setup').classList.add('hide');
   document.getElementById('stage').classList.add('on');
@@ -646,11 +645,13 @@ function startRun(){
 }
 function loop(now){
   if(!E.running) return;
-  const dt=Math.min(0.05,(now-E.last)/1000);
+  const rawDt=Math.max(0,(now-E.last)/1000);
   E.last=now;
+  const dt=Math.min(0.05,Math.max(0.001,rawDt)); // physics stability cap
   if(!E.paused && !E.done){
-    E.elapsed+=dt*1000;
-    E.relAcc+=E.total/(E.duration/1000)*dt;
+    E.elapsed+=rawDt*1000; // wall-clock: timer keeps running when tab is hidden
+    E.pourT+=rawDt;
+    E.relAcc+=E.total/(E.duration/1000)*rawDt;
     let guard=0;
     while(E.relAcc>=1 && E.released<E.total && E.grains.length<420 && guard++<90){
       E.relAcc-=1; E.released++;
@@ -853,11 +854,6 @@ function onShake(e){
   }
 }
 document.getElementById('bGyro').onclick=toggleGyro;
-document.addEventListener('visibilitychange',()=>{
-  if(document.hidden && E.running && !E.paused && !E.done){
-    E.paused=true; document.getElementById('bPause').classList.add('on');
-  }
-});
 window.addEventListener('resize', onResize);
 
 /* ================= boot ================= */
